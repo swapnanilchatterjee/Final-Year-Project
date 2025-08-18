@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {"id": "UserX"}, {"id": "ServiceX"}, {"id": "/x"}
+  ],
+  "edges": [
+    {"source": "UserX", "target": "/x", "type": "LOGIN", "weight": 1},
+    {"source": "ServiceX", "target": "/x", "type": "CALL /x", "weight": 1}
+  ]
+}
