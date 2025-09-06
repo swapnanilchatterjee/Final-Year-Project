@@ -1,25 +1,54 @@
 export function detectAnomalies({ nodes, edges, features, k = 1 }) {
   const anomalies = [];
-  const avgIn = Object.values(features).reduce((s, f) => s + f.inDegree, 0) / nodes.length;
-  const avgOut = Object.values(features).reduce((s, f) => s + f.outDegree, 0) / nodes.length;
 
-  // Step 1: Compute anomaly scores for each node
+  // Collect degree distributions
+  const inDegrees = Object.values(features).map(f => f.inDegree);
+  const outDegrees = Object.values(features).map(f => f.outDegree);
+
+  const avgIn = inDegrees.reduce((a, b) => a + b, 0) / inDegrees.length;
+  const avgOut = outDegrees.reduce((a, b) => a + b, 0) / outDegrees.length;
+
+  const stdIn = Math.sqrt(inDegrees.reduce((a, b) => a + (b - avgIn) ** 2, 0) / inDegrees.length);
+  const stdOut = Math.sqrt(outDegrees.reduce((a, b) => a + (b - avgOut) ** 2, 0) / outDegrees.length);
+
   const scores = [];
+
+  // Step 1: Compute anomaly scores using z-scores + categorical boosts
   for (const [nodeId, f] of Object.entries(features)) {
-    let score = 0; 
+    let score = 0;
     const reasons = [];
 
-    if (f.inDegree > avgIn * 3) { score += 0.3; reasons.push('High in-degree'); }
-    if (f.outDegree > avgOut * 3) { score += 0.3; reasons.push('High out-degree'); }
-    if (f.type === 'ALERT') { score += 0.5; reasons.push('Alert node'); }
+    // Z-score for in-degree
+    if (stdIn > 0 && f.inDegree > avgIn) {
+      const zIn = (f.inDegree - avgIn) / stdIn;
+      score += zIn;
+      reasons.push(`High in-degree (z=${zIn.toFixed(2)})`);
+    }
+
+    // Z-score for out-degree
+    if (stdOut > 0 && f.outDegree > avgOut) {
+      const zOut = (f.outDegree - avgOut) / stdOut;
+      score += zOut;
+      reasons.push(`High out-degree (z=${zOut.toFixed(2)})`);
+    }
+
+    // Boosts for categorical conditions
+    if (f.type === 'ALERT') {
+      score += 2; // strong signal
+      reasons.push('Alert node');
+    }
 
     if (f.type === 'SERVICE') {
       const serviceEdges = edges.filter(e => e.source === nodeId || e.target === nodeId);
       const errorEdges = serviceEdges.filter(e => String(e.type).includes('500'));
-      if (errorEdges.length > 0) { score += 0.4; reasons.push('Service errors detected'); }
+      if (errorEdges.length > 0) {
+        score += 1.5; // moderate boost
+        reasons.push('Service errors detected');
+      }
     }
 
     features[nodeId].anomalyScore = score;
+    features[nodeId].reasons = reasons;
     scores.push(score);
   }
 
@@ -34,8 +63,8 @@ export function detectAnomalies({ nodes, edges, features, k = 1 }) {
     if (f.anomalyScore > threshold) {
       anomalies.push({
         nodeId,
-        score: f.anomalyScore,
-        reasons: f.reasons || '', 
+        score: Number(f.anomalyScore.toFixed(2)),
+        reasons: f.reasons.join(', '),
         type: f.type
       });
     }
