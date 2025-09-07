@@ -1,4 +1,4 @@
-# ✨ Intelligent Threat Hunting in Multi-Cloud Environments using Graph Neural Networks
+## ✨ Intelligent Threat Hunting in Multi-Cloud Environments using Graph Neural Networks
 
 Welcome to the project repository for **Intelligent Threat Hunting in Multi-Cloud Environments using Graph Neural Networks (GNNs)**.  
 This project is a blueprint for a next-generation security platform designed to tackle the most formidable challenges of modern multi-cloud infrastructure.  
