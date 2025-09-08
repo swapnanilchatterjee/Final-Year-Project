@@ -19,27 +19,55 @@ export function detectAnomalies({ nodes, edges, features, k = 1 }) {
 
     // In-degree anomaly
     if (f.inDegree > avgIn + k * stdIn) {
-      metrics.push((f.inDegree - avgIn) / (stdIn || 1));
+      const inScore = (f.inDegree - avgIn) / (stdIn || 1);
+      metrics.push(inScore);
       reasons.push('Unusual in-degree');
     }
 
     // Out-degree anomaly
     if (f.outDegree > avgOut + k * stdOut) {
-      metrics.push((f.outDegree - avgOut) / (stdOut || 1));
+      const outScore = (f.outDegree - avgOut) / (stdOut || 1);
+      metrics.push(outScore);
       reasons.push('Unusual out-degree');
     }
 
-    // Check service-related anomalies (e.g., many errors)
+    // Service error anomalies
     if (f.type === 'SERVICE') {
       const serviceEdges = edges.filter(e => e.source === nodeId || e.target === nodeId);
-      const errorEdges = serviceEdges.filter(e => String(e.type).includes('5xx'));
+      const errorEdges = serviceEdges.filter(e => String(e.type).includes('500') || String(e.type).includes('5xx'));
       if (errorEdges.length > 0) {
-        metrics.push(errorEdges.length); 
+        metrics.push(errorEdges.length * 0.5); // weight error edges
         reasons.push('Service errors detected');
       }
     }
 
-    // Combine metrics → anomaly score
+    // Alert node anomalies
+    if (f.type === 'ALERT') {
+      metrics.push(1.0); // alerts carry high anomaly weight
+      reasons.push('Alert node triggered');
+    }
+
+    // Attack node anomalies
+    if (f.type === 'ATTACK') {
+      metrics.push(2.0); // attack events are very suspicious
+      reasons.push('Attack activity detected');
+    }
+
+    if (f.type === 'ATTACKER') {
+      metrics.push(1.5); // suspicious attacker node
+      reasons.push('Suspicious attacker profile');
+    }
+
+    // Resource anomalies if applicable
+    if (f.type === 'RESOURCE') {
+      const resourceEdges = edges.filter(e => e.source === nodeId || e.target === nodeId);
+      if (resourceEdges.length > avgOut + k * stdOut) {
+        metrics.push(0.5);
+        reasons.push('Excessive resource interactions');
+      }
+    }
+
+    // Final anomaly score aggregation
     const score = metrics.reduce((a, b) => a + b, 0);
     features[nodeId].anomalyScore = score;
     features[nodeId].reasons = reasons;
