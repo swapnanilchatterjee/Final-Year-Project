@@ -77,14 +77,26 @@ export default class GraphNeuralNetwork {
   }
 
   classifyNodeType(id) {
-    if (String(id).startsWith('User')) return 'USER';
-    if (String(id).startsWith('Server')) return 'SERVER';
-    if (String(id).startsWith('Service')) return 'SERVICE';
-    if (String(id) === 'ConsoleLogin') return 'ATTACK';
-    if (String(id) === 'attacker@example.com') return 'ATTACKER';
-    if (String(id) === 'Account') return 'RESOURCE';
-    if (String(id).startsWith('/')) return 'ENDPOINT';
-    if (['HighCPU', 'MemoryThreshold', 'DiskFull'].includes(String(id))) return 'ALERT';
+    const idStr = String(id);
+    if (idStr.startsWith('User')) return 'USER';
+    if (idStr.startsWith('Server')) return 'SERVER';
+    if (idStr.startsWith('Service')) return 'SERVICE';
+    if (idStr === 'ConsoleLogin') return 'ATTACK';
+    if (idStr === 'attacker@example.com') return 'ATTACKER';
+    if (idStr === 'Account') return 'RESOURCE';
+    if (idStr.startsWith('/')) return 'ENDPOINT';
+
+    // Detect known alerts dynamically
+    const alertKeywords = ['CPU', 'Memory', 'Disk', 'Threshold', 'Error', 'Fail', 'Overload'];
+    if (alertKeywords.some(word => idStr.toLowerCase().includes(word.toLowerCase()))) {
+      return 'ALERT';
+    }
+
+    // Detect random suspicious nodes heuristically
+    if (/attack|malware|breach|exploit/i.test(idStr)) {
+      return 'ATTACK';
+    }
+
     return 'RESOURCE';
   }
 
@@ -240,7 +252,7 @@ export default class GraphNeuralNetwork {
 
   analyzeSystemHealth() {
     const servers = Object.keys(this.nodeFeatures).filter(id => String(id).startsWith('Server'));
-    const alerts = Object.keys(this.nodeFeatures).filter(id => this.classifyNodeType(id) === 'ALERT');
+    const alerts = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'ALERT');
     const health = {
       totalServers: servers.length,
       totalAlerts: alerts.length,
