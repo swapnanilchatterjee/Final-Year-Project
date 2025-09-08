@@ -82,7 +82,7 @@ const GNNLogAnalyzer = () => {
         </select>
       </div>
 
-      <div className="space-x-2">
+      <div className="space-x-2 mb-4">
         <button
           onClick={runAnalysis}
           disabled={isAnalyzing}
@@ -101,29 +101,36 @@ const GNNLogAnalyzer = () => {
       </div>
 
       {analysisResults && (
-        <div className="mt-6 space-y-4">
-          <h2 className="text-xl font-semibold">Overview</h2>
-          <pre className="bg-gray-100 p-2 rounded">
-            {JSON.stringify(analysisResults.overview, null, 2)}
-          </pre>
+        <div className="mt-6 space-y-6">
+          <div>
+            <h2 className="text-xl font-semibold mb-2">Overview</h2>
+            <pre className="bg-gray-100 p-2 rounded">
+              {JSON.stringify(analysisResults.overview, null, 2)}
+            </pre>
+          </div>
 
-          <h2 className="text-xl font-semibold">System Health</h2>
-          <pre className="bg-gray-100 p-2 rounded">
-            {JSON.stringify(analysisResults.systemHealth, null, 2)}
-          </pre>
+          <div>
+            <h2 className="text-xl font-semibold mb-2">System Health</h2>
+            <pre className="bg-gray-100 p-2 rounded">
+              {JSON.stringify(analysisResults.systemHealth, null, 2)}
+            </pre>
+          </div>
 
-          <h2 className="text-xl font-semibold">Anomalies</h2>
-          {analysisResults.anomalies?.length > 0 ? (
-            <ul className="list-disc pl-6">
-              {analysisResults.anomalies.map((a, i) => (
-                <li key={i}>
-                  <strong>{a.nodeId}</strong> – {a.reasons} (score: {a.score})
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>No anomalies detected</p>
-          )}
+          <div>
+            <h2 className="text-xl font-semibold mb-2">Anomalies</h2>
+            {analysisResults.anomalies?.length > 0 ? (
+              <ul className="list-disc pl-6">
+                {analysisResults.anomalies.map((a, i) => (
+                  <li key={i}>
+                    <strong>{a.nodeId}</strong> – {a.reasons.join(", ")} (score:{" "}
+                    {a.score.toFixed(2)}) [{a.type}]
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No anomalies detected</p>
+            )}
+          </div>
         </div>
       )}
     </div>
