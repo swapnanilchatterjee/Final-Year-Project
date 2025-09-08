@@ -37,7 +37,7 @@ export default class GraphNeuralNetwork {
         clusteringCoefficient: 0,
         shortestPathMetrics: {},
         anomalyScore: 0,
-        reasons: [] // Initialize reasons to avoid errors
+        reasons: []
       };
     }
 
@@ -137,18 +137,23 @@ export default class GraphNeuralNetwork {
     const features = this.nodeFeatures;
     const anomalies = [];
     const avgIn = Object.values(features).reduce((sum, f) => sum + f.inDegree, 0) / Object.keys(features).length;
+    const stdIn = Math.sqrt(Object.values(features).reduce((sum, f) => sum + Math.pow(f.inDegree - avgIn, 2), 0) / Object.keys(features).length);
+
     const avgOut = Object.values(features).reduce((sum, f) => sum + f.outDegree, 0) / Object.keys(features).length;
+    const stdOut = Math.sqrt(Object.values(features).reduce((sum, f) => sum + Math.pow(f.outDegree - avgOut, 2), 0) / Object.keys(features).length);
 
     for (const [nodeId, f] of Object.entries(features)) {
       let score = 0;
       const reasons = [];
 
-      if (f.inDegree > avgIn * 3) {
-        score += 0.3;
+      if (stdIn > 0 && f.inDegree > avgIn + stdIn) {
+        const inScore = (f.inDegree - avgIn) / stdIn;
+        score += inScore * 0.3;
         reasons.push('High in-degree');
       }
-      if (f.outDegree > avgOut * 3) {
-        score += 0.3;
+      if (stdOut > 0 && f.outDegree > avgOut + stdOut) {
+        const outScore = (f.outDegree - avgOut) / stdOut;
+        score += outScore * 0.3;
         reasons.push('High out-degree');
       }
       if (f.type === 'ALERT') {
@@ -173,12 +178,25 @@ export default class GraphNeuralNetwork {
       }
 
       f.anomalyScore = score;
-      f.reasons = reasons; // Store as array
+      f.reasons = reasons;
+    }
 
-      if (score > 0.3) {
-        anomalies.push({ nodeId, score, reasons, type: f.type });
+    const allScores = Object.values(features).map(f => f.anomalyScore);
+    const meanScore = allScores.reduce((sum, s) => sum + s, 0) / allScores.length;
+    const stdDev = Math.sqrt(allScores.reduce((sum, s) => sum + Math.pow(s - meanScore, 2), 0) / allScores.length);
+    const threshold = meanScore + stdDev;
+
+    for (const [nodeId, f] of Object.entries(features)) {
+      if (f.anomalyScore > threshold) {
+        anomalies.push({
+          nodeId,
+          score: f.anomalyScore,
+          reasons: f.reasons,
+          type: f.type
+        });
       }
     }
+
     return anomalies.sort((a, b) => b.score - a.score);
   }
 
@@ -222,7 +240,7 @@ export default class GraphNeuralNetwork {
 
   analyzeSystemHealth() {
     const servers = Object.keys(this.nodeFeatures).filter(id => String(id).startsWith('Server'));
-    const alerts = Object.keys(this.nodeFeatures).filter(id => ['HighCPU', 'MemoryThreshold', 'DiskFull'].includes(id));
+    const alerts = Object.keys(this.nodeFeatures).filter(id => this.classifyNodeType(id) === 'ALERT');
     const health = {
       totalServers: servers.length,
       totalAlerts: alerts.length,
@@ -233,7 +251,7 @@ export default class GraphNeuralNetwork {
       const alertEdges = serverEdges.filter(e => alerts.includes(e.target));
       health.serverAlerts[server] = {
         alertCount: alertEdges.length,
-        alertTypes: alertEdges.map(e => e.target),
+        alertTypes: [...new Set(alertEdges.map(e => e.target))],
         status: alertEdges.length > 0 ? 'CRITICAL' : 'HEALTHY'
       };
     }
