@@ -26,7 +26,6 @@ export default class GraphNeuralNetwork {
   initializeNodeFeatures() {
     const f = {};
 
-    // initialize all nodes
     for (const n of this.nodes) {
       const id = n.id;
       f[id] = {
@@ -42,7 +41,6 @@ export default class GraphNeuralNetwork {
       };
     }
 
-    // add missing nodes that may appear in edges
     for (const e of this.edges) {
       if (!f[e.source]) {
         f[e.source] = {
@@ -70,8 +68,6 @@ export default class GraphNeuralNetwork {
           anomalyScore: 0
         };
       }
-
-      // increment degrees safely
       if (f[e.source]) f[e.source].outDegree++;
       if (f[e.target]) f[e.target].inDegree++;
     }
@@ -83,8 +79,11 @@ export default class GraphNeuralNetwork {
     if (String(id).startsWith('User')) return 'USER';
     if (String(id).startsWith('Server')) return 'SERVER';
     if (String(id).startsWith('Service')) return 'SERVICE';
+    if (String(id) === 'ConsoleLogin') return 'ATTACK';
+    if (String(id) === 'attacker@example.com') return 'ATTACKER';
+    if (String(id) === 'Account') return 'RESOURCE';
     if (String(id).startsWith('/')) return 'ENDPOINT';
-    if ([ 'HighCPU', 'MemoryThreshold', 'DiskFull' ].includes(String(id))) return 'ALERT';
+    if (['HighCPU', 'MemoryThreshold', 'DiskFull'].includes(String(id))) return 'ALERT';
     return 'RESOURCE';
   }
 
@@ -97,10 +96,11 @@ export default class GraphNeuralNetwork {
   }
 
   reconstructPath(previous, source, target) {
-    const p = []; let cur = target;
-    while (cur !== null && cur !== undefined) { 
-      p.unshift(cur); 
-      cur = previous[cur]; 
+    const p = [];
+    let cur = target;
+    while (cur !== null && cur !== undefined) {
+      p.unshift(cur);
+      cur = previous[cur];
     }
     return p[0] === source ? p : [];
   }
@@ -135,17 +135,42 @@ export default class GraphNeuralNetwork {
     const avgOut = Object.values(features).reduce((s, f) => s + f.outDegree, 0) / Object.keys(features).length;
 
     for (const [nodeId, f] of Object.entries(features)) {
-      let score = 0; const reasons = [];
-      if (f.inDegree > avgIn * 3) { score += 0.3; reasons.push('High in-degree'); }
-      if (f.outDegree > avgOut * 3) { score += 0.3; reasons.push('High out-degree'); }
-      if (f.type === 'ALERT') { score += 0.5; reasons.push('Alert node'); }
+      let score = 0;
+      const reasons = [];
+
+      if (f.inDegree > avgIn * 3) {
+        score += 0.3;
+        reasons.push('High in-degree');
+      }
+      if (f.outDegree > avgOut * 3) {
+        score += 0.3;
+        reasons.push('High out-degree');
+      }
+      if (f.type === 'ALERT') {
+        score += 0.5;
+        reasons.push('Alert node');
+      }
       if (f.type === 'SERVICE') {
         const serviceEdges = this.edges.filter(e => e.source === nodeId || e.target === nodeId);
         const errorEdges = serviceEdges.filter(e => String(e.type).includes('500'));
-        if (errorEdges.length > 0) { score += 0.4; reasons.push('Service errors detected'); }
+        if (errorEdges.length > 0) {
+          score += 0.4;
+          reasons.push('Service errors detected');
+        }
       }
+      if (f.type === 'ATTACK') {
+        score += 0.8;
+        reasons.push('Attack node detected');
+      }
+      if (f.type === 'ATTACKER') {
+        score += 0.7;
+        reasons.push('Suspicious attacker node');
+      }
+
       features[nodeId].anomalyScore = score;
-      if (score > 0.3) anomalies.push({ nodeId, score, reasons: reasons.join(', '), type: f.type });
+      if (score > 0.3) {
+        anomalies.push({ nodeId, score, reasons: reasons.join(', '), type: f.type });
+      }
     }
     return anomalies.sort((a, b) => b.score - a.score);
   }
@@ -161,6 +186,7 @@ export default class GraphNeuralNetwork {
         viewCount: userEdges.filter(e => e.type === 'VIEW').length,
         cartActions: userEdges.filter(e => e.type === 'ADD_TO_CART').length,
         logoutCount: userEdges.filter(e => e.type === 'LOGOUT').length,
+        attackAttempts: userEdges.filter(e => e.type === 'ATTEMPT').length,
         uniqueEndpoints: new Set(userEdges.map(e => e.target)).size,
         sessionComplete: false
       };
@@ -203,6 +229,20 @@ export default class GraphNeuralNetwork {
     return health;
   }
 
+  analyzeAttacks() {
+    const attacks = {};
+    const attackNodes = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'ATTACK');
+    for (const id of attackNodes) {
+      const relatedEdges = this.edges.filter(e => e.source === id || e.target === id);
+      attacks[id] = {
+        relatedNodes: new Set(relatedEdges.map(e => e.source === id ? e.target : e.source)).size,
+        totalEdges: relatedEdges.length,
+        severityScore: this.nodeFeatures[id].anomalyScore
+      };
+    }
+    return attacks;
+  }
+
   getNodeTypeDistribution() {
     const d = {};
     for (const f of Object.values(this.nodeFeatures)) d[f.type] = (d[f.type] || 0) + 1;
@@ -210,10 +250,14 @@ export default class GraphNeuralNetwork {
   }
 
   calculateAveragePathLength(sp) {
-    let total = 0; let count = 0;
+    let total = 0;
+    let count = 0;
     for (const v of Object.values(sp)) {
       for (const dist of Object.values(v.distances)) {
-        if (dist !== Infinity && dist > 0) { total += dist; count++; }
+        if (dist !== Infinity && dist > 0) {
+          total += dist;
+          count++;
+        }
       }
     }
     return count > 0 ? total / count : 0;
@@ -226,6 +270,7 @@ export default class GraphNeuralNetwork {
     const userBehavior = this.analyzeUserBehavior();
     const serviceAnalysis = this.analyzeServiceCommunication();
     const systemHealth = this.analyzeSystemHealth();
+    const attackAnalysis = this.analyzeAttacks();
 
     return {
       overview: {
@@ -238,6 +283,7 @@ export default class GraphNeuralNetwork {
       userBehavior,
       serviceAnalysis,
       systemHealth,
+      attackAnalysis,
       shortestPaths,
       nodeFeatures: this.nodeFeatures,
       nodes: this.nodes,
