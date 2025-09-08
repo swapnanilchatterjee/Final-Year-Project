@@ -6,7 +6,8 @@
     {"id": "/home"}, {"id": "/products"}, {"id": "/products/101"}, {"id": "/products/102"},
     {"id": "/products/103"}, {"id": "/products/104"}, {"id": "/profile"},
     {"id": "/getData"}, {"id": "/process"}, {"id": "/update"},
-    {"id": "HighCPU"}, {"id": "MemoryThreshold"}, {"id": "DiskFull"}
+    {"id": "HighCPU"}, {"id": "MemoryThreshold"}, {"id": "DiskFull"},
+    {"id": "ConsoleLogin"}, {"id": "attacker@example.com"}, {"id": "Account"}
   ],
   "edges": [
     {"source": "UserA", "target": "/home", "type": "LOGIN", "weight": 5},
@@ -21,7 +22,6 @@
     {"source": "UserA", "target": "/home", "type": "LOGOUT", "weight": 1},
     {"source": "UserB", "target": "/profile", "type": "LOGOUT", "weight": 2},
     {"source": "UserC", "target": "/products", "type": "LOGOUT", "weight": 1},
-
     {"source": "ServiceA", "target": "ServiceB", "type": "CALL /getData", "weight": 5},
     {"source": "ServiceB", "target": "ServiceC", "type": "CALL /process", "weight": 4},
     {"source": "ServiceC", "target": "ServiceB", "type": "RESPOND 200", "weight": 3},
@@ -30,7 +30,6 @@
     {"source": "ServiceC", "target": "ServiceA", "type": "RESPOND 500", "weight": 8},
     {"source": "ServiceA", "target": "ServiceC", "type": "CALL /update RETRY", "weight": 6},
     {"source": "ServiceC", "target": "ServiceA", "type": "RESPOND 200", "weight": 4},
-
     {"source": "Server1", "target": "CPU", "type": "USAGE 60%", "weight": 4},
     {"source": "Server2", "target": "CPU", "type": "USAGE 85%", "weight": 7},
     {"source": "Server2", "target": "HighCPU", "type": "ALERT", "weight": 8},
@@ -39,13 +38,14 @@
     {"source": "Server1", "target": "DISK", "type": "USAGE 50%", "weight": 3},
     {"source": "Server2", "target": "DISK", "type": "USAGE 95%", "weight": 8},
     {"source": "Server2", "target": "DiskFull", "type": "ALERT", "weight": 9},
-
     {"source": "UserD", "target": "/home", "type": "LOGIN", "weight": 5},
     {"source": "UserD", "target": "/products", "type": "VIEW", "weight": 2},
     {"source": "UserD", "target": "/products/104", "type": "ADD_TO_CART", "weight": 4},
     {"source": "UserD", "target": "/products", "type": "LOGOUT", "weight": 1},
     {"source": "UserE", "target": "/home", "type": "LOGIN", "weight": 5},
     {"source": "UserE", "target": "/profile", "type": "VIEW", "weight": 6},
-    {"source": "UserE", "target": "/profile", "type": "LOGOUT", "weight": 2}
+    {"source": "UserE", "target": "/profile", "type": "LOGOUT", "weight": 2},
+    {"source": "ConsoleLogin", "target": "attacker@example.com", "type": "ATTEMPT", "weight": 8},
+    {"source": "attacker@example.com", "target": "Account", "type": "TARGET", "weight": 8}
   ]
 }
