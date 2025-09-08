@@ -13,8 +13,8 @@ export default function GraphVisualizer({ nodes, edges, height = 380 }) {
     const width = ref.current.clientWidth || 800;
 
     const color = d3.scaleOrdinal()
-      .domain(['USER', 'SERVER', 'SERVICE', 'ENDPOINT', 'ALERT', 'RESOURCE'])
-      .range(['#3b82f6', '#16a34a', '#8b5cf6', '#0ea5e9', '#ef4444', '#6b7280']);
+      .domain(['USER', 'SERVER', 'SERVICE', 'ENDPOINT', 'ALERT', 'RESOURCE', 'ATTACK', 'ATTACKER'])
+      .range(['#3b82f6', '#16a34a', '#8b5cf6', '#0ea5e9', '#ef4444', '#6b7280', '#f97316', '#db2777']);
 
     const idToType = new Map(nodes.map(n => [n.id, inferType(n.id)]));
 
@@ -26,9 +26,9 @@ export default function GraphVisualizer({ nodes, edges, height = 380 }) {
 
     for (let i = 0; i < 200; i++) sim.tick();
 
-    // links
     svg.attr('viewBox', [0, 0, width, height]);
 
+    // Draw edges
     svg.append('g')
       .attr('stroke', '#cbd5e1')
       .attr('stroke-opacity', 0.8)
@@ -40,7 +40,7 @@ export default function GraphVisualizer({ nodes, edges, height = 380 }) {
       .attr('x2', d => getNode(nodes, d.target).x)
       .attr('y2', d => getNode(nodes, d.target).y);
 
-    // nodes
+    // Draw nodes
     const nodeG = svg.append('g')
       .selectAll('g')
       .data(nodes)
@@ -51,7 +51,8 @@ export default function GraphVisualizer({ nodes, edges, height = 380 }) {
       .attr('r', 8)
       .attr('fill', d => color(idToType.get(d.id)));
 
-    nodeG.append('title').text(d => d.id);
+    nodeG.append('title').text(d => `${d.id} (${idToType.get(d.id)})`);
+
     nodeG.append('text')
       .text(d => d.id)
       .attr('x', 10)
@@ -67,13 +68,14 @@ export default function GraphVisualizer({ nodes, edges, height = 380 }) {
       if (String(id).startsWith('User')) return 'USER';
       if (String(id).startsWith('Server')) return 'SERVER';
       if (String(id).startsWith('Service')) return 'SERVICE';
+      if (String(id) === 'ConsoleLogin') return 'ATTACK';
+      if (String(id) === 'attacker@example.com') return 'ATTACKER';
+      if (String(id) === 'Account') return 'RESOURCE';
       if (String(id).startsWith('/')) return 'ENDPOINT';
-      if ([ 'HighCPU', 'MemoryThreshold', 'DiskFull' ].includes(String(id))) return 'ALERT';
+      if (['HighCPU', 'MemoryThreshold', 'DiskFull'].includes(String(id))) return 'ALERT';
       return 'RESOURCE';
     }
   }, [nodes, edges, height]);
 
   return <svg ref={ref} className="w-full" style={{ height }} />;
 }
-
-
