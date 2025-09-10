@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest --environment jsdom"
+    "test": "vitest"
   },
   "dependencies": {
     "d3": "^7.9.0",
@@ -29,5 +29,3 @@
     "vitest": "^2.1.3"
   }
 }
-
-

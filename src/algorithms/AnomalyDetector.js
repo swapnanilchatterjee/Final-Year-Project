@@ -67,7 +67,7 @@ export function detectAnomalies({ nodes, edges, features, k = 1 }) {
     scores.push(score);
   }
 
-  // --- Step 2: Compute universal threshold ---
+  // --- Step 2: Compute universal threshold T = μ + kσ ()---
   const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
   const variance = scores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / scores.length;
   const stdDev = Math.sqrt(variance);

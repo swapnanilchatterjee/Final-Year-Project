@@ -1,288 +1,461 @@
-import { dijkstra } from './ShortestPath.js';
+//  Generalized Graph Neural Network for Multi-Cloud Threat Detection
+//  Integrates with existing generalized modules: anomalyDetector.js, shortestPath.js, and dread.js
+
+
+// Import your existing generalized modules (function-based, not class-based)
+import { detectAnomalies } from './anomalyDetector.js';
+import { dijkstra } from './shortestPath.js';
+import { calculateDREADScore } from './dread.js'; // Tried DREAD implementation
 
 export default class GraphNeuralNetwork {
-  constructor(nodes = [], edges = []) {
+  constructor(nodes = [], edges = [], config = {}) {
     this.nodes = nodes || [];
     this.edges = edges || [];
+    this.config = {
+      anomalyThreshold: config.anomalyThreshold || 1.5, // k-sigma threshold
+      pageRankIterations: config.pageRankIterations || 20,
+      pageRankDamping: config.pageRankDamping || 0.85,
+      convergenceThreshold: config.convergenceThreshold || 1e-6,
+      ...config
+    };
+    
     this.adjacencyMatrix = this.buildAdjacencyMatrix();
     this.nodeFeatures = this.initializeNodeFeatures();
   }
 
   buildAdjacencyMatrix() {
-    const ids = this.nodes.map(n => n.id);
+    // Get all unique node IDs from both nodes and edges
+    const allIds = new Set([
+      ...this.nodes.map(n => n.id),
+      ...this.edges.flatMap(e => [e.source, e.target])
+    ]);
+    
     const matrix = {};
-    for (const a of ids) {
+    for (const a of allIds) {
       matrix[a] = {};
-      for (const b of ids) matrix[a][b] = 0;
+      for (const b of allIds) {
+        matrix[a][b] = 0;
+      }
     }
+    
+    // Fill matrix with edge weights
     for (const edge of this.edges) {
-      if (matrix[edge.source] && matrix[edge.target]) {
+      if (matrix[edge.source] && matrix[edge.target] !== undefined) {
         matrix[edge.source][edge.target] = edge.weight || 1;
       }
     }
+    
     return matrix;
   }
 
+  
   initializeNodeFeatures() {
     const features = {};
-    for (const node of this.nodes) {
-      const id = node.id;
+    // Get all unique node IDs
+    const allNodeIds = new Set([
+      ...this.nodes.map(n => n.id),
+      ...this.edges.flatMap(e => [e.source, e.target])
+    ]);
+    
+    // Initialize features for each node
+    for (const id of allNodeIds) {
+      const nodeData = this.nodes.find(n => n.id === id);
       features[id] = {
         id,
-        type: this.classifyNodeType(id),
+        type: nodeData?.type || this.classifyNodeType(id),
+        criticality: nodeData?.criticality || 5, // Default criticality
         inDegree: 0,
         outDegree: 0,
-        pageRank: 0,
+        totalDegree: 0,
+        pageRank: 1.0 / allNodeIds.size,
         betweennessCentrality: 0,
         clusteringCoefficient: 0,
-        shortestPathMetrics: {},
         anomalyScore: 0,
+        dreadScore: 0,
         reasons: []
       };
     }
-
+    
+    // Calculate degree metrics
     for (const edge of this.edges) {
-      if (!features[edge.source]) {
-        features[edge.source] = {
-          id: edge.source,
-          type: this.classifyNodeType(edge.source),
-          inDegree: 0,
-          outDegree: 0,
-          pageRank: 0,
-          betweennessCentrality: 0,
-          clusteringCoefficient: 0,
-          shortestPathMetrics: {},
-          anomalyScore: 0,
-          reasons: []
-        };
-      }
-      if (!features[edge.target]) {
-        features[edge.target] = {
-          id: edge.target,
-          type: this.classifyNodeType(edge.target),
-          inDegree: 0,
-          outDegree: 0,
-          pageRank: 0,
-          betweennessCentrality: 0,
-          clusteringCoefficient: 0,
-          shortestPathMetrics: {},
-          anomalyScore: 0,
-          reasons: []
-        };
-      }
-      features[edge.source].outDegree++;
-      features[edge.target].inDegree++;
+      if (features[edge.source]) features[edge.source].outDegree++;
+      if (features[edge.target]) features[edge.target].inDegree++;
     }
+    
+    // Calculate total degrees
+    for (const feature of Object.values(features)) {
+      feature.totalDegree = feature.inDegree + feature.outDegree;
+    }
+    
     return features;
   }
 
   classifyNodeType(id) {
-    const idStr = String(id);
-    if (idStr.startsWith('User')) return 'USER';
-    if (idStr.startsWith('Server')) return 'SERVER';
-    if (idStr.startsWith('Service')) return 'SERVICE';
-    if (idStr === 'ConsoleLogin') return 'ATTACK';
-    if (idStr === 'attacker@example.com') return 'ATTACKER';
-    if (idStr === 'Account') return 'RESOURCE';
-    if (idStr.startsWith('/')) return 'ENDPOINT';
-
-    // Detect known alerts dynamically
-    const alertKeywords = ['CPU', 'Memory', 'Disk', 'Threshold', 'Error', 'Fail', 'Overload'];
-    if (alertKeywords.some(word => idStr.toLowerCase().includes(word.toLowerCase()))) {
-      return 'ALERT';
+    const idStr = String(id).toLowerCase();
+    
+    const patterns = {
+      'USER': /^(user|client|account|person)/i,
+      'SERVER': /^(server|host|machine|vm|instance)/i,
+      'SERVICE': /^(service|api|microservice|app)/i,
+      'ENDPOINT': /^(\/|endpoint|route|url)/i,
+      'DATABASE': /(db|database|mongo|sql|redis)/i,
+      'NETWORK': /(router|switch|gateway|firewall|balancer)/i,
+      'ALERT': /(alert|warning|notification|alarm)/i,
+      'ATTACKER': /(attacker|hacker|threat|malicious)/i,
+      'ATTACK': /(attack|malware|breach|exploit|intrusion)/i,
+      'RESOURCE': /(resource|file|storage|bucket|volume)/i,
+    };
+    
+    for (const [type, pattern] of Object.entries(patterns)) {
+      if (pattern.test(idStr)) return type;
     }
-
-    // Detect random suspicious nodes heuristically
-    if (/attack|malware|breach|exploit/i.test(idStr)) {
-      return 'ATTACK';
-    }
-
-    return 'RESOURCE';
+    
+    return 'UNKNOWN';
   }
 
-  calculateOptimizedShortestPaths() {
-    const paths = {};
-    for (const node of Object.keys(this.nodeFeatures)) {
-      paths[node] = dijkstra(this.nodes, this.adjacencyMatrix, node);
+  calculatePageRank() {
+    const nodeIds = Object.keys(this.nodeFeatures);
+    const n = nodeIds.length;
+    if (n === 0) return {};
+    
+    const damping = this.config.pageRankDamping;
+    let pagerank = Object.fromEntries(nodeIds.map(id => [id, 1.0 / n]));
+    
+    for (let iter = 0; iter < this.config.pageRankIterations; iter++) {
+      const newPagerank = {};
+      let maxDiff = 0;
+      
+      for (const node of nodeIds) {
+        let rankSum = 0;
+        
+        // Sum contributions from incoming links
+        for (const source of nodeIds) {
+          if (this.adjacencyMatrix[source][node] > 0) {
+            const outDegree = Object.values(this.adjacencyMatrix[source])
+              .reduce((sum, weight) => sum + (weight > 0 ? 1 : 0), 0);
+            if (outDegree > 0) {
+              rankSum += pagerank[source] / outDegree;
+            }
+          }
+        }
+        
+        newPagerank[node] = (1 - damping) / n + damping * rankSum;
+        maxDiff = Math.max(maxDiff, Math.abs(newPagerank[node] - pagerank[node]));
+      }
+      
+      pagerank = newPagerank;
+      
+      // Check for convergence
+      if (maxDiff < this.config.convergenceThreshold) break;
     }
-    return paths;
-  }
-
-  reconstructPath(previous, source, target) {
-    const path = [];
-    let current = target;
-    while (current !== null && current !== undefined) {
-      path.unshift(current);
-      current = previous[current];
+    
+    // Update node features
+    for (const id of nodeIds) {
+      this.nodeFeatures[id].pageRank = pagerank[id];
     }
-    return path[0] === source ? path : [];
+    
+    return pagerank;
   }
 
   calculateBetweennessCentrality() {
-    const centrality = {};
-    for (const id of Object.keys(this.nodeFeatures)) {
-      centrality[id] = 0;
-    }
-    const sp = this.calculateOptimizedShortestPaths();
-
-    for (const s of Object.keys(this.nodeFeatures)) {
-      for (const t of Object.keys(this.nodeFeatures)) {
-        if (s === t) continue;
-        const path = this.reconstructPath(sp[s].previous, s, t);
+    const centrality = Object.fromEntries(
+      Object.keys(this.nodeFeatures).map(id => [id, 0])
+    );
+    
+    const nodeIds = Object.keys(this.nodeFeatures);
+    
+    // Calculate for each source node
+    for (const source of nodeIds) {
+      const { previous } = dijkstra(this.nodes, this.adjacencyMatrix, source);
+      
+      // Count paths through each intermediate node
+      for (const target of nodeIds) {
+        if (source === target) continue;
+        
+        const path = this.reconstructPath(previous, source, target);
+        // Count intermediate nodes (exclude source and target)
         for (let i = 1; i < path.length - 1; i++) {
           if (centrality[path[i]] !== undefined) {
-            centrality[path[i]] += 1;
+            centrality[path[i]]++;
           }
         }
       }
     }
-
-    const n = Object.keys(this.nodeFeatures).length;
+    
+    // Normalize centrality values
+    const n = nodeIds.length;
     const normalizer = (n - 1) * (n - 2) / 2;
+    
     for (const [id, value] of Object.entries(centrality)) {
       this.nodeFeatures[id].betweennessCentrality = normalizer ? value / normalizer : 0;
     }
+    
     return centrality;
   }
 
-  detectAnomalies() {
-    const features = this.nodeFeatures;
-    const anomalies = [];
-    const avgIn = Object.values(features).reduce((sum, f) => sum + f.inDegree, 0) / Object.keys(features).length;
-    const stdIn = Math.sqrt(Object.values(features).reduce((sum, f) => sum + Math.pow(f.inDegree - avgIn, 2), 0) / Object.keys(features).length);
-
-    const avgOut = Object.values(features).reduce((sum, f) => sum + f.outDegree, 0) / Object.keys(features).length;
-    const stdOut = Math.sqrt(Object.values(features).reduce((sum, f) => sum + Math.pow(f.outDegree - avgOut, 2), 0) / Object.keys(features).length);
-
-    for (const [nodeId, f] of Object.entries(features)) {
-      let score = 0;
-      const reasons = [];
-
-      if (stdIn > 0 && f.inDegree > avgIn + stdIn) {
-        const inScore = (f.inDegree - avgIn) / stdIn;
-        score += inScore * 0.3;
-        reasons.push('High in-degree');
+  calculateClusteringCoefficient() {
+    for (const nodeId of Object.keys(this.nodeFeatures)) {
+      const neighbors = Object.keys(this.adjacencyMatrix[nodeId] || {})
+        .filter(neighbor => this.adjacencyMatrix[nodeId][neighbor] > 0);
+      
+      if (neighbors.length < 2) {
+        this.nodeFeatures[nodeId].clusteringCoefficient = 0;
+        continue;
       }
-      if (stdOut > 0 && f.outDegree > avgOut + stdOut) {
-        const outScore = (f.outDegree - avgOut) / stdOut;
-        score += outScore * 0.3;
-        reasons.push('High out-degree');
-      }
-      if (f.type === 'ALERT') {
-        score += 0.5;
-        reasons.push('Alert node');
-      }
-      if (f.type === 'SERVICE') {
-        const serviceEdges = this.edges.filter(e => e.source === nodeId || e.target === nodeId);
-        const errorEdges = serviceEdges.filter(e => String(e.type).includes('500'));
-        if (errorEdges.length > 0) {
-          score += 0.4;
-          reasons.push('Service errors detected');
+      
+      let triangles = 0;
+      const possible = neighbors.length * (neighbors.length - 1) / 2;
+      
+      // Count triangles
+      for (let i = 0; i < neighbors.length; i++) {
+        for (let j = i + 1; j < neighbors.length; j++) {
+          if (this.adjacencyMatrix[neighbors[i]][neighbors[j]] > 0) {
+            triangles++;
+          }
         }
       }
-      if (f.type === 'ATTACK') {
-        score += 0.8;
-        reasons.push('Attack node detected');
-      }
-      if (f.type === 'ATTACKER') {
-        score += 0.7;
-        reasons.push('Suspicious attacker node');
-      }
-
-      f.anomalyScore = score;
-      f.reasons = reasons;
+      
+      this.nodeFeatures[nodeId].clusteringCoefficient = possible > 0 ? triangles / possible : 0;
     }
-
-    const allScores = Object.values(features).map(f => f.anomalyScore);
-    const meanScore = allScores.reduce((sum, s) => sum + s, 0) / allScores.length;
-    const stdDev = Math.sqrt(allScores.reduce((sum, s) => sum + Math.pow(s - meanScore, 2), 0) / allScores.length);
-    const threshold = meanScore + stdDev;
-
-    for (const [nodeId, f] of Object.entries(features)) {
-      if (f.anomalyScore > threshold) {
-        anomalies.push({
-          nodeId,
-          score: f.anomalyScore,
-          reasons: f.reasons,
-          type: f.type
-        });
-      }
-    }
-
-    return anomalies.sort((a, b) => b.score - a.score);
   }
+
+
+  calculateAllShortestPaths() {
+    const paths = {};
+    for (const nodeId of Object.keys(this.nodeFeatures)) {
+      paths[nodeId] = dijkstra(this.nodes, this.adjacencyMatrix, nodeId);
+    }
+    return paths;
+  }
+
+
+  reconstructPath(previous, source, target) {
+    const path = [];
+    let current = target;
+    
+    while (current !== null && current !== undefined) {
+      path.unshift(current);
+      current = previous[current];
+    }
+    
+    return path[0] === source ? path : [];
+  }
+
+ 
+  calculateDREADScores() {
+    const nodeIds = Object.keys(this.nodeFeatures);
+    const nodes = Object.values(this.nodeFeatures);
+    
+    // Calculate max values for normalization
+    const maxValues = {
+      inDegree: Math.max(...nodes.map(n => n.inDegree), 1),
+      outDegree: Math.max(...nodes.map(n => n.outDegree), 1),
+      centrality: Math.max(...nodes.map(n => n.betweennessCentrality), 1),
+      pageRank: Math.max(...nodes.map(n => n.pageRank), 1),
+      totalDegree: Math.max(...nodes.map(n => n.totalDegree), 1)
+    };
+    
+    // Calculate DREAD score for each node
+    for (const nodeId of nodeIds) {
+      const node = this.nodeFeatures[nodeId];
+      node.dreadScore = calculateDREADScore(node, maxValues, this.edges);
+    }
+  }
+
+
+  analyze() {
+    // Step 1: Calculate graph metrics
+    this.calculatePageRank();
+    this.calculateBetweennessCentrality();
+    this.calculateClusteringCoefficient();
+    
+    // Step 2: Calculate DREAD scores
+    this.calculateDREADScores();
+    
+    // Step 3: Detect anomalies using your generalized function
+    const anomalies = detectAnomalies({
+      nodes: this.nodes,
+      edges: this.edges,
+      features: this.nodeFeatures,
+      k: this.config.anomalyThreshold
+    });
+    
+    // Step 4: Calculate shortest paths for backtracking
+    const shortestPaths = this.calculateAllShortestPaths();
+    
+    // Step 5: Analyze specific domains
+    const userBehavior = this.analyzeUserBehavior();
+    const serviceAnalysis = this.analyzeServiceCommunication();
+    const systemHealth = this.analyzeSystemHealth();
+    const attackAnalysis = this.analyzeAttacks();
+    
+    // Step 6: Reconstruct threat paths
+    const threatPaths = this.reconstructThreatPaths(anomalies, shortestPaths);
+    
+    console.log("DEBUG: Nodes counted in analyze():", this.nodes.map(n => n.id || n));
+
+    return {
+      overview: {
+        totalNodes: Object.keys(this.nodeFeatures).length,
+        totalEdges: this.edges.length,
+        nodeTypeDistribution: this.getNodeTypeDistribution(),
+        avgPathLength: this.calculateAveragePathLength(shortestPaths),
+        graphDensity: this.calculateGraphDensity()
+      },
+      anomalies: anomalies.sort((a, b) => b.score - a.score),
+      threatPaths,
+      userBehavior,
+      serviceAnalysis,
+      systemHealth,
+      attackAnalysis,
+      shortestPaths,
+      nodeFeatures: this.nodeFeatures
+    };
+  }
+
+
+  reconstructThreatPaths(anomalies, shortestPaths) {
+    const threatPaths = [];
+    
+    // Find potential attack sources
+    const attackSources = Object.keys(this.nodeFeatures).filter(id => {
+      const type = this.nodeFeatures[id].type;
+      return ['ATTACKER', 'ATTACK', 'UNKNOWN'].includes(type) || 
+             this.nodeFeatures[id].anomalyScore > 0;
+    });
+    
+    // Find critical targets
+    const criticalTargets = Object.keys(this.nodeFeatures).filter(id => {
+      const type = this.nodeFeatures[id].type;
+      return ['SERVER', 'DATABASE', 'SERVICE'].includes(type);
+    });
+    
+    // Reconstruct paths from sources to targets through anomalies
+    for (const anomaly of anomalies) {
+      for (const source of attackSources) {
+        if (source === anomaly.nodeId) continue;
+        
+        const pathData = shortestPaths[source];
+        if (pathData.distances[anomaly.nodeId] !== Infinity) {
+          const path = this.reconstructPath(pathData.previous, source, anomaly.nodeId);
+          if (path.length > 1) {
+            threatPaths.push({
+              source,
+              target: anomaly.nodeId,
+              path,
+              distance: pathData.distances[anomaly.nodeId],
+              riskScore: this.calculatePathRiskScore(path),
+              anomalyScore: anomaly.score
+            });
+          }
+        }
+      }
+    }
+    
+    return threatPaths.sort((a, b) => b.riskScore - a.riskScore);
+  }
+
+
+  calculatePathRiskScore(path) {
+    let riskScore = 0;
+    
+    for (const nodeId of path) {
+      const feature = this.nodeFeatures[nodeId];
+      riskScore += feature.anomalyScore + feature.dreadScore;
+      
+      // Add type-based risk weights
+      const typeRisk = {
+        'ATTACKER': 3.0,
+        'ATTACK': 2.5,
+        'ALERT': 1.5,
+        'DATABASE': 1.5,
+        'SERVER': 1.2,
+        'SERVICE': 1.0
+      };
+      
+      riskScore += typeRisk[feature.type] || 0.5;
+    }
+    
+    // Normalize by path length
+    return path.length > 0 ? riskScore / path.length : 0;
+  }
+
 
   analyzeUserBehavior() {
     const users = {};
-    const userIds = Object.keys(this.nodeFeatures).filter(id => String(id).startsWith('User'));
+    const userIds = Object.keys(this.nodeFeatures)
+      .filter(id => this.nodeFeatures[id].type === 'USER');
+    
     for (const id of userIds) {
       const userEdges = this.edges.filter(e => e.source === id);
+      const uniqueTargets = new Set(userEdges.map(e => e.target));
+      
       users[id] = {
         totalActions: userEdges.length,
-        loginCount: userEdges.filter(e => e.type === 'LOGIN').length,
-        viewCount: userEdges.filter(e => e.type === 'VIEW').length,
-        cartActions: userEdges.filter(e => e.type === 'ADD_TO_CART').length,
-        logoutCount: userEdges.filter(e => e.type === 'LOGOUT').length,
-        attackAttempts: userEdges.filter(e => e.type === 'ATTEMPT').length,
-        uniqueEndpoints: [...new Set(userEdges.map(e => e.target))].length,
-        sessionComplete: false
+        uniqueEndpoints: uniqueTargets.size,
+        anomalyScore: this.nodeFeatures[id].anomalyScore,
+        dreadScore: this.nodeFeatures[id].dreadScore,
+        isSuspicious: this.nodeFeatures[id].anomalyScore > 1.0
       };
-      users[id].sessionComplete = users[id].loginCount > 0 && users[id].logoutCount > 0;
     }
+    
     return users;
   }
 
   analyzeServiceCommunication() {
-    const services = Object.keys(this.nodeFeatures).filter(id => String(id).startsWith('Service'));
+    const services = Object.keys(this.nodeFeatures)
+      .filter(id => this.nodeFeatures[id].type === 'SERVICE');
     const analysis = {};
+    
     for (const service of services) {
-      const outgoing = this.edges.filter(e => e.source === service);
       const incoming = this.edges.filter(e => e.target === service);
+      const outgoing = this.edges.filter(e => e.source === service);
+      
       analysis[service] = {
-        outgoingCalls: outgoing.length,
         incomingCalls: incoming.length,
-        successfulResponses: incoming.filter(e => String(e.type).includes('200')).length,
-        errorResponses: incoming.filter(e => String(e.type).includes('500')).length,
-        retryAttempts: outgoing.filter(e => String(e.type).includes('RETRY')).length,
-        reliability: incoming.length > 0 ? incoming.filter(e => String(e.type).includes('200')).length / incoming.length : 1
+        outgoingCalls: outgoing.length,
+        anomalyScore: this.nodeFeatures[service].anomalyScore,
+        dreadScore: this.nodeFeatures[service].dreadScore
       };
     }
+    
     return analysis;
   }
 
   analyzeSystemHealth() {
-    const servers = Object.keys(this.nodeFeatures).filter(id => String(id).startsWith('Server'));
-    const alerts = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'ALERT');
-    const health = {
+    const servers = Object.keys(this.nodeFeatures)
+      .filter(id => this.nodeFeatures[id].type === 'SERVER');
+    const alerts = Object.keys(this.nodeFeatures)
+      .filter(id => this.nodeFeatures[id].type === 'ALERT');
+    
+    return {
       totalServers: servers.length,
       totalAlerts: alerts.length,
-      serverAlerts: {}
+      highRiskServers: servers.filter(id => 
+        this.nodeFeatures[id].anomalyScore > 1.0 || 
+        this.nodeFeatures[id].dreadScore > 7.0
+      ).length
     };
-    for (const server of servers) {
-      const serverEdges = this.edges.filter(e => e.source === server);
-      const alertEdges = serverEdges.filter(e => alerts.includes(e.target));
-      health.serverAlerts[server] = {
-        alertCount: alertEdges.length,
-        alertTypes: [...new Set(alertEdges.map(e => e.target))],
-        status: alertEdges.length > 0 ? 'CRITICAL' : 'HEALTHY'
-      };
-    }
-    return health;
   }
 
   analyzeAttacks() {
+    const attackNodes = Object.keys(this.nodeFeatures)
+      .filter(id => ['ATTACK', 'ATTACKER'].includes(this.nodeFeatures[id].type));
     const attacks = {};
-    const attackNodes = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'ATTACK');
+    
     for (const id of attackNodes) {
       const relatedEdges = this.edges.filter(e => e.source === id || e.target === id);
       attacks[id] = {
-        relatedNodes: new Set(relatedEdges.map(e => e.source === id ? e.target : e.source)).size,
-        totalEdges: relatedEdges.length,
-        severityScore: this.nodeFeatures[id].anomalyScore
+        relatedEdges: relatedEdges.length,
+        anomalyScore: this.nodeFeatures[id].anomalyScore,
+        dreadScore: this.nodeFeatures[id].dreadScore,
+        centrality: this.nodeFeatures[id].betweennessCentrality
       };
     }
+    
     return attacks;
   }
+
 
   getNodeTypeDistribution() {
     const distribution = {};
@@ -292,45 +465,25 @@ export default class GraphNeuralNetwork {
     return distribution;
   }
 
-  calculateAveragePathLength(sp) {
+  calculateAveragePathLength(shortestPaths) {
     let total = 0;
     let count = 0;
-    for (const paths of Object.values(sp)) {
-      for (const dist of Object.values(paths.distances)) {
-        if (dist !== Infinity && dist > 0) {
-          total += dist;
+    
+    for (const paths of Object.values(shortestPaths)) {
+      for (const distance of Object.values(paths.distances)) {
+        if (distance !== Infinity && distance > 0) {
+          total += distance;
           count++;
         }
       }
     }
+    
     return count > 0 ? total / count : 0;
   }
 
-  analyze() {
-    const shortestPaths = this.calculateOptimizedShortestPaths();
-    this.calculateBetweennessCentrality();
-    const anomalies = this.detectAnomalies();
-    const userBehavior = this.analyzeUserBehavior();
-    const serviceAnalysis = this.analyzeServiceCommunication();
-    const systemHealth = this.analyzeSystemHealth();
-    const attackAnalysis = this.analyzeAttacks();
-
-    return {
-      overview: {
-        totalNodes: Object.keys(this.nodeFeatures).length,
-        totalEdges: this.edges.length,
-        nodeTypes: this.getNodeTypeDistribution(),
-        avgPathLength: this.calculateAveragePathLength(shortestPaths)
-      },
-      anomalies,
-      userBehavior,
-      serviceAnalysis,
-      systemHealth,
-      attackAnalysis,
-      shortestPaths,
-      nodeFeatures: this.nodeFeatures,
-      nodes: this.nodes,
-      edges: this.edges
-    };
+  calculateGraphDensity() {
+    const n = Object.keys(this.nodeFeatures).length;
+    if (n < 2) return 0;
+    return (2 * this.edges.length) / (n * (n - 1));
   }
 }
