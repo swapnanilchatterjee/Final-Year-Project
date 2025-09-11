@@ -1,18 +1,16 @@
-//  Generalized Graph Neural Network for Multi-Cloud Threat Detection
-//  Integrates with existing generalized modules: anomalyDetector.js, shortestPath.js, and dread.js
+// Generalized Graph Neural Network for Multi-Cloud Threat Detection
+// Integrates with existing generalized modules: anomalyDetector.js, shortestPath.js, and dread.js
 
-
-// Import your existing generalized modules (function-based, not class-based)
 import { detectAnomalies } from './anomalyDetector.js';
 import { dijkstra } from './shortestPath.js';
-import { calculateDREADScore } from './dread.js'; // Tried DREAD implementation
+import { calculateDREADScore } from './dread.js';
 
 export default class GraphNeuralNetwork {
   constructor(nodes = [], edges = [], config = {}) {
     this.nodes = nodes || [];
     this.edges = edges || [];
     this.config = {
-      anomalyThreshold: config.anomalyThreshold || 1.5, // k-sigma threshold
+      anomalyThreshold: config.anomalyThreshold || 1.5,
       pageRankIterations: config.pageRankIterations || 20,
       pageRankDamping: config.pageRankDamping || 0.85,
       convergenceThreshold: config.convergenceThreshold || 1e-6,
@@ -24,12 +22,11 @@ export default class GraphNeuralNetwork {
   }
 
   buildAdjacencyMatrix() {
-    // Get all unique node IDs from both nodes and edges
     const allIds = new Set([
       ...this.nodes.map(n => n.id),
       ...this.edges.flatMap(e => [e.source, e.target])
     ]);
-    
+
     const matrix = {};
     for (const a of allIds) {
       matrix[a] = {};
@@ -37,33 +34,29 @@ export default class GraphNeuralNetwork {
         matrix[a][b] = 0;
       }
     }
-    
-    // Fill matrix with edge weights
+
     for (const edge of this.edges) {
-      if (matrix[edge.source] && matrix[edge.target] !== undefined) {
+      if (matrix.hasOwnProperty(edge.source) && matrix.hasOwnProperty(edge.target)) {
         matrix[edge.source][edge.target] = edge.weight || 1;
       }
     }
-    
+
     return matrix;
   }
 
-  
   initializeNodeFeatures() {
     const features = {};
-    // Get all unique node IDs
     const allNodeIds = new Set([
       ...this.nodes.map(n => n.id),
       ...this.edges.flatMap(e => [e.source, e.target])
     ]);
-    
-    // Initialize features for each node
+
     for (const id of allNodeIds) {
       const nodeData = this.nodes.find(n => n.id === id);
       features[id] = {
         id,
         type: nodeData?.type || this.classifyNodeType(id),
-        criticality: nodeData?.criticality || 5, // Default criticality
+        criticality: nodeData?.criticality || 5,
         inDegree: 0,
         outDegree: 0,
         totalDegree: 0,
@@ -75,24 +68,21 @@ export default class GraphNeuralNetwork {
         reasons: []
       };
     }
-    
-    // Calculate degree metrics
+
     for (const edge of this.edges) {
       if (features[edge.source]) features[edge.source].outDegree++;
       if (features[edge.target]) features[edge.target].inDegree++;
     }
-    
-    // Calculate total degrees
+
     for (const feature of Object.values(features)) {
       feature.totalDegree = feature.inDegree + feature.outDegree;
     }
-    
+
     return features;
   }
 
   classifyNodeType(id) {
     const idStr = String(id).toLowerCase();
-    
     const patterns = {
       'USER': /^(user|client|account|person)/i,
       'SERVER': /^(server|host|machine|vm|instance)/i,
@@ -105,11 +95,11 @@ export default class GraphNeuralNetwork {
       'ATTACK': /(attack|malware|breach|exploit|intrusion)/i,
       'RESOURCE': /(resource|file|storage|bucket|volume)/i,
     };
-    
+
     for (const [type, pattern] of Object.entries(patterns)) {
       if (pattern.test(idStr)) return type;
     }
-    
+
     return 'UNKNOWN';
   }
 
@@ -117,18 +107,16 @@ export default class GraphNeuralNetwork {
     const nodeIds = Object.keys(this.nodeFeatures);
     const n = nodeIds.length;
     if (n === 0) return {};
-    
+
     const damping = this.config.pageRankDamping;
     let pagerank = Object.fromEntries(nodeIds.map(id => [id, 1.0 / n]));
-    
+
     for (let iter = 0; iter < this.config.pageRankIterations; iter++) {
       const newPagerank = {};
       let maxDiff = 0;
-      
+
       for (const node of nodeIds) {
         let rankSum = 0;
-        
-        // Sum contributions from incoming links
         for (const source of nodeIds) {
           if (this.adjacencyMatrix[source][node] > 0) {
             const outDegree = Object.values(this.adjacencyMatrix[source])
@@ -138,22 +126,18 @@ export default class GraphNeuralNetwork {
             }
           }
         }
-        
         newPagerank[node] = (1 - damping) / n + damping * rankSum;
         maxDiff = Math.max(maxDiff, Math.abs(newPagerank[node] - pagerank[node]));
       }
-      
+
       pagerank = newPagerank;
-      
-      // Check for convergence
       if (maxDiff < this.config.convergenceThreshold) break;
     }
-    
-    // Update node features
+
     for (const id of nodeIds) {
       this.nodeFeatures[id].pageRank = pagerank[id];
     }
-    
+
     return pagerank;
   }
 
@@ -161,19 +145,13 @@ export default class GraphNeuralNetwork {
     const centrality = Object.fromEntries(
       Object.keys(this.nodeFeatures).map(id => [id, 0])
     );
-    
     const nodeIds = Object.keys(this.nodeFeatures);
-    
-    // Calculate for each source node
+
     for (const source of nodeIds) {
       const { previous } = dijkstra(this.nodes, this.adjacencyMatrix, source);
-      
-      // Count paths through each intermediate node
       for (const target of nodeIds) {
         if (source === target) continue;
-        
         const path = this.reconstructPath(previous, source, target);
-        // Count intermediate nodes (exclude source and target)
         for (let i = 1; i < path.length - 1; i++) {
           if (centrality[path[i]] !== undefined) {
             centrality[path[i]]++;
@@ -181,15 +159,13 @@ export default class GraphNeuralNetwork {
         }
       }
     }
-    
-    // Normalize centrality values
+
     const n = nodeIds.length;
     const normalizer = (n - 1) * (n - 2) / 2;
-    
     for (const [id, value] of Object.entries(centrality)) {
       this.nodeFeatures[id].betweennessCentrality = normalizer ? value / normalizer : 0;
     }
-    
+
     return centrality;
   }
 
@@ -197,16 +173,12 @@ export default class GraphNeuralNetwork {
     for (const nodeId of Object.keys(this.nodeFeatures)) {
       const neighbors = Object.keys(this.adjacencyMatrix[nodeId] || {})
         .filter(neighbor => this.adjacencyMatrix[nodeId][neighbor] > 0);
-      
       if (neighbors.length < 2) {
         this.nodeFeatures[nodeId].clusteringCoefficient = 0;
         continue;
       }
-      
       let triangles = 0;
       const possible = neighbors.length * (neighbors.length - 1) / 2;
-      
-      // Count triangles
       for (let i = 0; i < neighbors.length; i++) {
         for (let j = i + 1; j < neighbors.length; j++) {
           if (this.adjacencyMatrix[neighbors[i]][neighbors[j]] > 0) {
@@ -214,11 +186,9 @@ export default class GraphNeuralNetwork {
           }
         }
       }
-      
       this.nodeFeatures[nodeId].clusteringCoefficient = possible > 0 ? triangles / possible : 0;
     }
   }
-
 
   calculateAllShortestPaths() {
     const paths = {};
@@ -228,25 +198,19 @@ export default class GraphNeuralNetwork {
     return paths;
   }
 
-
   reconstructPath(previous, source, target) {
     const path = [];
     let current = target;
-    
     while (current !== null && current !== undefined) {
       path.unshift(current);
       current = previous[current];
     }
-    
     return path[0] === source ? path : [];
   }
 
- 
   calculateDREADScores() {
     const nodeIds = Object.keys(this.nodeFeatures);
     const nodes = Object.values(this.nodeFeatures);
-    
-    // Calculate max values for normalization
     const maxValues = {
       inDegree: Math.max(...nodes.map(n => n.inDegree), 1),
       outDegree: Math.max(...nodes.map(n => n.outDegree), 1),
@@ -254,44 +218,32 @@ export default class GraphNeuralNetwork {
       pageRank: Math.max(...nodes.map(n => n.pageRank), 1),
       totalDegree: Math.max(...nodes.map(n => n.totalDegree), 1)
     };
-    
-    // Calculate DREAD score for each node
     for (const nodeId of nodeIds) {
       const node = this.nodeFeatures[nodeId];
       node.dreadScore = calculateDREADScore(node, maxValues, this.edges);
     }
   }
 
-
   analyze() {
-    // Step 1: Calculate graph metrics
     this.calculatePageRank();
     this.calculateBetweennessCentrality();
     this.calculateClusteringCoefficient();
-    
-    // Step 2: Calculate DREAD scores
     this.calculateDREADScores();
-    
-    // Step 3: Detect anomalies using your generalized function
+
     const anomalies = detectAnomalies({
       nodes: this.nodes,
       edges: this.edges,
       features: this.nodeFeatures,
       k: this.config.anomalyThreshold
     });
-    
-    // Step 4: Calculate shortest paths for backtracking
+
     const shortestPaths = this.calculateAllShortestPaths();
-    
-    // Step 5: Analyze specific domains
     const userBehavior = this.analyzeUserBehavior();
     const serviceAnalysis = this.analyzeServiceCommunication();
     const systemHealth = this.analyzeSystemHealth();
     const attackAnalysis = this.analyzeAttacks();
-    
-    // Step 6: Reconstruct threat paths
     const threatPaths = this.reconstructThreatPaths(anomalies, shortestPaths);
-    
+
     console.log("DEBUG: Nodes counted in analyze():", this.nodes.map(n => n.id || n));
 
     return {
@@ -313,28 +265,20 @@ export default class GraphNeuralNetwork {
     };
   }
 
-
   reconstructThreatPaths(anomalies, shortestPaths) {
     const threatPaths = [];
-    
-    // Find potential attack sources
     const attackSources = Object.keys(this.nodeFeatures).filter(id => {
       const type = this.nodeFeatures[id].type;
-      return ['ATTACKER', 'ATTACK', 'UNKNOWN'].includes(type) || 
-             this.nodeFeatures[id].anomalyScore > 0;
+      return ['ATTACKER', 'ATTACK', 'UNKNOWN'].includes(type) || this.nodeFeatures[id].anomalyScore > 0;
     });
-    
-    // Find critical targets
     const criticalTargets = Object.keys(this.nodeFeatures).filter(id => {
       const type = this.nodeFeatures[id].type;
       return ['SERVER', 'DATABASE', 'SERVICE'].includes(type);
     });
-    
-    // Reconstruct paths from sources to targets through anomalies
+
     for (const anomaly of anomalies) {
       for (const source of attackSources) {
         if (source === anomaly.nodeId) continue;
-        
         const pathData = shortestPaths[source];
         if (pathData.distances[anomaly.nodeId] !== Infinity) {
           const path = this.reconstructPath(pathData.previous, source, anomaly.nodeId);
@@ -351,19 +295,15 @@ export default class GraphNeuralNetwork {
         }
       }
     }
-    
+
     return threatPaths.sort((a, b) => b.riskScore - a.riskScore);
   }
 
-
   calculatePathRiskScore(path) {
     let riskScore = 0;
-    
     for (const nodeId of path) {
       const feature = this.nodeFeatures[nodeId];
       riskScore += feature.anomalyScore + feature.dreadScore;
-      
-      // Add type-based risk weights
       const typeRisk = {
         'ATTACKER': 3.0,
         'ATTACK': 2.5,
@@ -372,24 +312,17 @@ export default class GraphNeuralNetwork {
         'SERVER': 1.2,
         'SERVICE': 1.0
       };
-      
       riskScore += typeRisk[feature.type] || 0.5;
     }
-    
-    // Normalize by path length
     return path.length > 0 ? riskScore / path.length : 0;
   }
 
-
   analyzeUserBehavior() {
     const users = {};
-    const userIds = Object.keys(this.nodeFeatures)
-      .filter(id => this.nodeFeatures[id].type === 'USER');
-    
+    const userIds = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'USER');
     for (const id of userIds) {
       const userEdges = this.edges.filter(e => e.source === id);
       const uniqueTargets = new Set(userEdges.map(e => e.target));
-      
       users[id] = {
         totalActions: userEdges.length,
         uniqueEndpoints: uniqueTargets.size,
@@ -398,19 +331,15 @@ export default class GraphNeuralNetwork {
         isSuspicious: this.nodeFeatures[id].anomalyScore > 1.0
       };
     }
-    
     return users;
   }
 
   analyzeServiceCommunication() {
-    const services = Object.keys(this.nodeFeatures)
-      .filter(id => this.nodeFeatures[id].type === 'SERVICE');
+    const services = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'SERVICE');
     const analysis = {};
-    
     for (const service of services) {
       const incoming = this.edges.filter(e => e.target === service);
       const outgoing = this.edges.filter(e => e.source === service);
-      
       analysis[service] = {
         incomingCalls: incoming.length,
         outgoingCalls: outgoing.length,
@@ -418,16 +347,12 @@ export default class GraphNeuralNetwork {
         dreadScore: this.nodeFeatures[service].dreadScore
       };
     }
-    
     return analysis;
   }
 
   analyzeSystemHealth() {
-    const servers = Object.keys(this.nodeFeatures)
-      .filter(id => this.nodeFeatures[id].type === 'SERVER');
-    const alerts = Object.keys(this.nodeFeatures)
-      .filter(id => this.nodeFeatures[id].type === 'ALERT');
-    
+    const servers = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'SERVER');
+    const alerts = Object.keys(this.nodeFeatures).filter(id => this.nodeFeatures[id].type === 'ALERT');
     return {
       totalServers: servers.length,
       totalAlerts: alerts.length,
@@ -439,10 +364,10 @@ export default class GraphNeuralNetwork {
   }
 
   analyzeAttacks() {
-    const attackNodes = Object.keys(this.nodeFeatures)
-      .filter(id => ['ATTACK', 'ATTACKER'].includes(this.nodeFeatures[id].type));
+    const attackNodes = Object.keys(this.nodeFeatures).filter(id => 
+      ['ATTACK', 'ATTACKER'].includes(this.nodeFeatures[id].type)
+    );
     const attacks = {};
-    
     for (const id of attackNodes) {
       const relatedEdges = this.edges.filter(e => e.source === id || e.target === id);
       attacks[id] = {
@@ -452,10 +377,8 @@ export default class GraphNeuralNetwork {
         centrality: this.nodeFeatures[id].betweennessCentrality
       };
     }
-    
     return attacks;
   }
-
 
   getNodeTypeDistribution() {
     const distribution = {};
@@ -468,7 +391,6 @@ export default class GraphNeuralNetwork {
   calculateAveragePathLength(shortestPaths) {
     let total = 0;
     let count = 0;
-    
     for (const paths of Object.values(shortestPaths)) {
       for (const distance of Object.values(paths.distances)) {
         if (distance !== Infinity && distance > 0) {
@@ -477,7 +399,6 @@ export default class GraphNeuralNetwork {
         }
       }
     }
-    
     return count > 0 ? total / count : 0;
   }
 
